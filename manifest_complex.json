@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "SameTabOpener (V1.2)",
+  "version": "1.2.0",
+  "description": "Zendesk ticket routing + highlight duplicate domains + per-domain auto-refresh + close protection + debug tools.",
+  "background": {
+    "service_worker": "javascripts/background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SameTabOpener"
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting",
+    "webNavigation",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://*.zendesk.com/*",
+    "http://*.zendesk.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.zendesk.com/agent/*"],
+      "js": ["javascripts/contentBridge.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["javascripts/protectClose.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}

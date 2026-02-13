@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "SameTabOpener (Simple)",
+  "version": "1.3.0",
+  "description": "Zendesk tab reuse + close protection without interference.",
+  "background": {
+    "service_worker": "javascripts/background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SameTabOpener"
+  },
+  "permissions": [
+    "tabs",
+    "storage",
+    "webNavigation",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*.zendesk.com/*",
+    "http://*.zendesk.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["javascripts/protectClose.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  }
+}

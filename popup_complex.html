@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SameTabOpener V1.2</title>
+    <style>
+      body { 
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, "Helvetica Neue", Arial; 
+        margin: 0;
+        padding: 0;
+        width: 400px;
+        max-height: 600px;
+        overflow: hidden;
+      }
+      .tab-container {
+        display: flex;
+        border-bottom: 1px solid #ddd;
+        padding: 0 12px;
+      }
+      .tab-button {
+        padding: 12px 16px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        font-size: 13px;
+        color: #5f6368;
+      }
+      .tab-button.active {
+        border-bottom-color: #1a73e8;
+        color: #1a73e8;
+        font-weight: 500;
+      }
+      .tab-content {
+        display: none;
+        padding: 12px;
+      }
+      .tab-content.active {
+        display: block;
+        overflow-y: auto;
+        max-height: 500px;
+      }
+      .debug-controls {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 8px;
+        background: #f5f5f5;
+        border-radius: 4px;
+        flex-wrap: wrap;
+      }
+      .debug-logs {
+        font-family: 'Roboto Mono', monospace;
+        font-size: 12px;
+        background: #1e1e1e;
+        color: #e0e0e0;
+        height: 400px;
+        overflow-y: auto;
+        padding: 8px;
+        white-space: pre-wrap;
+        border-radius: 4px;
+        line-height: 1.4;
+      }
+      .log-entry {
+        margin: 2px 0;
+        padding: 2px 0;
+        border-bottom: 1px solid #333;
+      }
+      .log-entry.error {
+        color: #ff6b6b;
+      }
+      .log-entry.warn {
+        color: #ffd93d;
+      }
+      .log-time {
+        color: #888;
+        font-size: 11px;
+      }
+      .auto-scroll {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: #666;
+      }
+      /* Existing styles */
+      h1 { font-size: 16px; margin: 12px; }
+      h2 { font-size: 14px; margin: 14px 0 8px; border-bottom: 1px solid #eee; padding-bottom: 4px; }
+      .row { display: flex; gap: 6px; margin: 8px 0; }
+      input[type=text], input[type=number] { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; }
+      input[type=text] { flex: 1; }
+      input[type=number] { width: 80px; }
+      button { 
+        padding: 6px 12px; 
+        background: #f1f3f4; 
+        border: 1px solid #dadce0; 
+        border-radius: 4px; 
+        cursor: pointer;
+      }
+      button:hover { background: #e8eaed; }
+      button.primary {
+        background: #1a73e8;
+        color: white;
+        border-color: #1a73e8;
+      }
+      button.primary:hover { background: #1557b0; }
+      ul { list-style: none; padding: 0; margin: 8px 0; }
+      li { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center; 
+        padding: 6px 0;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .muted { color: #777; font-size: 12px; margin-top: 4px; }
+      .inline { display: inline-flex; align-items: center; gap: 6px; }
+      .actions { display: inline-flex; gap: 4px; }
+      .small { font-size: 12px; }
+      label { user-select: none; cursor: pointer; }
+      input[type=checkbox] { cursor: pointer; }
+      .debug-toggle {
+        background: #e8f0fe;
+        color: #1967d2;
+        border-color: #1967d2;
+      }
+      .debug-toggle:hover {
+        background: #d2e3fc;
+      }
+    </style>
+    <script src="javascripts/popup.js"></script>
+  </head>
+  <body>
+    <h1>SameTabOpener V1.2</h1>
+    
+    <div class="tab-container">
+      <button class="tab-button active" data-tab="settings">Settings</button>
+      <button class="tab-button" data-tab="debug">Debug Logs</button>
+    </div>
+
+    <div id="settings" class="tab-content active">
+      <div class="inline">
+        <input type="checkbox" id="highlightEnabled" />
+        <label for="highlightEnabled">Highlight tabs with same domain (shows duplicate count in the extension icon)</label>
+      </div>
+
+      <h2>Duplicate Tabs</h2>
+      <div class="row">
+        <button id="dupAlignAll">Align by URL (A→Z)</button>
+        <button id="dupRefresh">Scan Duplicates</button>
+        <div class="inline" style="gap:8px; margin-left:8px;">
+          <input type="checkbox" id="dupAuto" />
+          <label for="dupAuto">Auto refresh</label>
+        </div>
+      </div>
+      <ul id="dupGroups"></ul>
+      <div class="muted">Click a tab entry to jump to it. Groups are by domain.</div>
+
+      <h2>Auto-Refresh Rules</h2>
+      <div class="row">
+        <input type="text" id="refreshDomain" placeholder="example.com" />
+        <input type="number" id="refreshSeconds" placeholder="seconds" min="15" step="5" />
+        <button id="refreshAdd">Add</button>
+      </div>
+      <ul id="refreshList"></ul>
+      <div class="row">
+        <input type="text" id="refreshNowDomains" placeholder="comma-separated domains (optional)" />
+        <button id="refreshNow">Refresh now</button>
+      </div>
+      <div class="muted">Configured rules (domain + seconds). Minimum interval is 15 seconds. Subdomains are included.</div>
+
+      <h2>Close Protection Domains</h2>
+      <div class="row">
+        <input type="text" id="protectDomain" placeholder="example.com" />
+        <button id="protectAdd">Add</button>
+      </div>
+      <ul id="protectList"></ul>
+      <div class="muted">Tabs on these domains will show a confirmation prompt before closing/reloading.</div>
+    </div>
+
+    <div id="debug" class="tab-content">
+      <div class="debug-controls">
+        <button id="clearLogs">Clear Logs</button>
+        <button id="copyLogs">Copy Logs</button>
+        <button id="debugToggle" class="debug-toggle">Disable Debug</button>
+        <div class="auto-scroll">
+          <input type="checkbox" id="autoScroll" checked>
+          <label for="autoScroll">Auto-scroll</label>
+        </div>
+      </div>
+      <div id="debugLogs" class="debug-logs">Debug logs will appear here...</div>
+    </div>
+  </body>
+</html>

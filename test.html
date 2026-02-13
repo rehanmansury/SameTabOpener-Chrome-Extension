@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test SameTabOpener V1.2</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-link {
+            display: block;
+            padding: 10px;
+            margin: 10px 0;
+            background: #f0f0f0;
+            text-decoration: none;
+            color: #333;
+            border-radius: 4px;
+        }
+        .test-link:hover {
+            background: #e0e0e0;
+        }
+        .instructions {
+            background: #e8f4fd;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>SameTabOpener V1.2 Test Page</h1>
+    
+    <div class="instructions">
+        <h2>How to Test Tab Reuse:</h2>
+        <ol>
+            <li>Install the SameTabOpener V1.2 extension in Chrome</li>
+            <li>Click the extension icon and open the "Debug Logs" tab</li>
+            <li>Click one of the test links below</li>
+            <li>Click another test link (or the same one) in a new tab</li>
+            <li>The extension should reuse the existing tab instead of opening a new one</li>
+            <li>Check the debug logs to see the tab reuse process</li>
+        </ol>
+    </div>
+
+    <h2>Test Links:</h2>
+    
+    <a href="https://nexthink.zendesk.com/agent/#/tickets/133904" target="_blank" class="test-link">
+        🎫 Ticket #133904
+    </a>
+    
+    <a href="https://nexthink.zendesk.com/agent/#/tickets/133905" target="_blank" class="test-link">
+        🎫 Ticket #133905
+    </a>
+    
+    <a href="https://nexthink.zendesk.com/agent/#/tickets/133906" target="_blank" class="test-link">
+        🎫 Ticket #133906
+    </a>
+    
+    <a href="https://nexthink.zendesk.com/agent/" target="_blank" class="test-link">
+        🏢 Zendesk Agent Dashboard
+    </a>
+
+    <h2>Expected Behavior:</h2>
+    <ul>
+        <li>First ticket link opens in a new tab</li>
+        <li>Subsequent ticket links should reuse the existing Zendesk tab</li>
+        <li>The tab should focus and navigate to the new ticket</li>
+        <li>Debug logs show the tab reuse process</li>
+    </ul>
+
+    <h2>Debug Features:</h2>
+    <ul>
+        <li>Click the extension icon → "Debug Logs" tab</li>
+        <li>See real-time logs of tab operations</li>
+        <li>Toggle debug logging on/off</li>
+        <li>Copy logs for troubleshooting</li>
+    </ul>
+</body>
+</html>
