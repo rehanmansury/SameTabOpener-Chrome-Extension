@@ -117,17 +117,26 @@ const navigationTabs = new Set(); // Track tabs created for navigation
 // Refresh timers storage
 const refreshTimers = new Map();
 
+// Track ongoing navigation attempts to prevent loops
+const ongoingNavigations = new Set();
+
+// Debounce tracking for the same URL
+const lastNavigationTime = new Map();
+const NAVIGATION_DEBOUNCE_MS = 100; // Reduced to 100ms
+
+// Global navigation lock to prevent any loops
+let isNavigating = false;
+
 function markTabNew(tabId) {
   recentNewTabs.set(tabId, Date.now());
-  navigationTabs.add(tabId); // Also mark as navigation tab
   debugLogger.log(`Marked tab ${tabId} as new`);
 }
 
 function isTabRecentlyNew(tabId) {
-  // First check if it's a navigation tab
+  // Ignore internal navigation-target tabs created by the browser/extension
   if (navigationTabs.has(tabId)) {
-    debugLogger.log(`Tab ${tabId} is a navigation tab, treating as new`);
-    return true;
+    debugLogger.log(`Tab ${tabId} is a navigation tab, ignoring`);
+    return false;
   }
   
   const ts = recentNewTabs.get(tabId);
@@ -228,6 +237,15 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
   debugLogger.log(`New Tab ID: ${newTabId}`);
   debugLogger.log(`Ticket URL: ${ticketUrl}`);
   
+  // Set the global navigation lock
+  isNavigating = true;
+  
+  // Failsafe: release lock after 3 seconds in case something goes wrong
+  setTimeout(() => {
+    isNavigating = false;
+    debugLogger.log(`Global navigation lock released by timeout`);
+  }, 3000);
+  
   try {
     // Get settings to check if no-reload is enabled
     const settings = await storage.getAllSettings();
@@ -244,7 +262,24 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
       return;
     }
     
+    // Create a unique navigation key
+    const navigationKey = `${subdomain}-${ticketNumber}`;
+    
+    // Check if we're already processing this navigation to prevent loops
+    if (ongoingNavigations.has(navigationKey)) {
+      debugLogger.log(`⚠️ Navigation already in progress for ${navigationKey}, skipping to prevent loop`);
+      return;
+    }
+    
     debugLogger.log(`Looking for existing tabs for subdomain: ${subdomain}`);
+    
+    // Mark this navigation as in progress
+    ongoingNavigations.add(navigationKey);
+    
+    // Set a timeout to clear the navigation key after 5 seconds (failsafe)
+    setTimeout(() => {
+      ongoingNavigations.delete(navigationKey);
+    }, 5000);
     
     // Find all Zendesk tabs for this subdomain
     const allTabs = await chrome.tabs.query({
@@ -285,6 +320,30 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
     debugLogger.log(`Focusing tab ${targetTab.id}`);
     await chrome.tabs.update(targetTab.id, { active: true });
     await chrome.windows.update(targetTab.windowId, { focused: true });
+    
+    // Check if the target tab already has the exact same URL
+    if (targetTab.url === cleanUrl) {
+      debugLogger.log(`Target tab already has the same URL, no navigation needed`);
+      debugLogger.log('=== TAB REUSE COMPLETED ===');
+      
+      // Close the new tab after a short delay
+      setTimeout(async () => {
+        if (await tabExists(newTabId)) {
+          debugLogger.log(`Closing duplicate tab ${newTabId}`);
+          await chrome.tabs.remove(newTabId);
+        }
+        clearNavigationTab(newTabId); // Clear from tracking
+      }, 100);
+      
+      // Clear the navigation tracking
+      ongoingNavigations.delete(navigationKey);
+      
+      // Release the global lock
+      isNavigating = false;
+      debugLogger.log(`Global navigation lock released`);
+      
+      return;
+    }
     
     // Navigate to the new ticket
     if (useNoReload) {
@@ -339,24 +398,7 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
                 log(`Zendesk router method failed: ${e.message}`);
               }
               
-              // Method 2: Try to trigger click on internal link
-              try {
-                log('Looking for internal links...');
-                const links = document.querySelectorAll('a[href*="/agent/tickets/"]');
-                log(`Found ${links.length} ticket links`);
-                
-                for (const link of links) {
-                  if (link.href.includes(url.split('/agent/tickets/')[1])) {
-                    log('Found matching internal link, triggering click');
-                    link.click();
-                    return { success: true, method: 'internal-link-click', logs };
-                  }
-                }
-              } catch (e) {
-                log(`Internal link click method failed: ${e.message}`);
-              }
-              
-              // Method 3: Use history API with additional events
+              // Method 2: Use history API with additional events (preferred: stays in same tab)
               try {
                 log('Using history API with events');
                 const ticketId = url.split('/agent/tickets/')[1];
@@ -377,6 +419,32 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
                 return { success: true, method: 'history-api-with-events', logs };
               } catch (e) {
                 log(`History API method failed: ${e.message}`);
+              }
+
+              // Method 3: Try to trigger click on internal link (risk: some links open new tab)
+              try {
+                log('Looking for internal links...');
+                const links = document.querySelectorAll('a[href*="/agent/tickets/"]');
+                log(`Found ${links.length} ticket links`);
+                
+                const targetTicketId = url.split('/agent/tickets/')[1];
+                for (const link of links) {
+                  if (!link.href || !link.href.includes(targetTicketId)) continue;
+
+                  // Avoid links that are explicitly meant to open a new tab/window
+                  const targetAttr = (link.getAttribute('target') || '').toLowerCase();
+                  if (targetAttr === '_blank') {
+                    log('Found matching link but it has target=_blank; skipping');
+                    continue;
+                  }
+
+                  // Best-effort: ensure click is an in-page navigation
+                  log('Found matching internal link, triggering click');
+                  link.click();
+                  return { success: true, method: 'internal-link-click', logs };
+                }
+              } catch (e) {
+                log(`Internal link click method failed: ${e.message}`);
               }
               
               return { success: false, method: 'all-methods-failed', error: 'No navigation method succeeded', logs };
@@ -428,13 +496,30 @@ async function reuseZendeskTab(newTabId, ticketUrl) {
     
     debugLogger.log('=== TAB REUSE COMPLETED ===');
     
+    // Clear the navigation tracking
+    ongoingNavigations.delete(navigationKey);
+    
   } catch (error) {
     debugLogger.error('Error in reuseZendeskTab:', error);
+    // Make sure to clear on error too
+    ongoingNavigations.delete(navigationKey);
+  } finally {
+    // Always release the global lock
+    isNavigating = false;
+    debugLogger.log(`Global navigation lock released`);
   }
 }
 
 // Navigation handler
 async function handleNavigation(details) {
+  // Global lock check - if we're already navigating, skip everything
+  if (isNavigating) {
+    if (debugLogger.debugEnabled && isZendeskUrl(details.url)) {
+      debugLogger.log(`⚠️ GLOBAL LOCK: Already navigating, skipping Zendesk navigation`);
+    }
+    return;
+  }
+  
   // Only log Zendesk navigations if debug is enabled
   if (debugLogger.debugEnabled && isZendeskUrl(details.url)) {
     debugLogger.log(`=== ZENDESK NAVIGATION ===`);
@@ -451,6 +536,22 @@ async function handleNavigation(details) {
       debugLogger.log(`Ignoring sub-frame navigation: frameId=${details.frameId}`);
     }
     return;
+  }
+  
+  // Early loop prevention - check if this is a Zendesk URL and add immediate checks
+  if (isZendeskUrl(details.url)) {
+    const subdomain = extractSubdomain(details.url);
+    const ticketNumber = extractTicketNumber(details.url);
+    
+    if (subdomain && ticketNumber) {
+      const navigationKey = `${subdomain}-${ticketNumber}`;
+      
+      // Check if we're already processing this navigation
+      if (ongoingNavigations.has(navigationKey)) {
+        debugLogger.log(`⚠️ EARLY LOOP DETECTION: Navigation already in progress for ${navigationKey}, skipping`);
+        return;
+      }
+    }
   }
   
   // Check for Teams safelinks to Zendesk
@@ -486,6 +587,15 @@ async function processZendeskNavigation(tabId, url) {
   if (debugLogger.debugEnabled) {
     debugLogger.log(`Is Zendesk ticket URL: true`);
     debugLogger.log(`Extracted - Subdomain: ${subdomain}, Ticket: ${ticketNumber}`);
+  }
+  
+  // Create navigation key to check for ongoing operations
+  const navigationKey = `${subdomain}-${ticketNumber}`;
+  
+  // Check if we're already processing this navigation to prevent loops
+  if (ongoingNavigations.has(navigationKey)) {
+    debugLogger.log(`⚠️ Navigation already in progress for ${navigationKey}, skipping to prevent loop`);
+    return;
   }
   
   // Only process new tabs
@@ -694,7 +804,35 @@ chrome.webNavigation.onCreatedNavigationTarget.addListener(details => {
     debugLogger.log(`Window ID: ${details.windowId}`);
     debugLogger.log(`========================`);
   }
-  if (details.tabId) markTabNew(details.tabId);
+  // If this was triggered during our tab reuse/navigation, prevent Zendesk from spawning a new tab.
+  // Close the created tab and force the navigation in the source tab instead.
+  if (isNavigating && details.sourceTabId && details.tabId && details.url && (TICKET_ROUTE.test(details.url) || HASH_TICKET_ROUTE.test(details.url))) {
+    debugLogger.log(`⚠️ Preventing navigation-target tab ${details.tabId}; forcing navigation in source tab ${details.sourceTabId}`);
+    setTimeout(async () => {
+      try {
+        await chrome.tabs.update(details.sourceTabId, { url: details.url });
+      } catch (e) {
+        debugLogger.error('Failed to force navigation in source tab:', e);
+      }
+      try {
+        if (await tabExists(details.tabId)) {
+          await chrome.tabs.remove(details.tabId);
+          debugLogger.log(`Closed navigation-target tab ${details.tabId}`);
+        }
+      } catch (e) {
+        debugLogger.error('Failed to close navigation-target tab:', e);
+      }
+    }, 0);
+
+    navigationTabs.add(details.tabId);
+    debugLogger.log(`Marked tab ${details.tabId} as navigation tab`);
+    return;
+  }
+  if (details.tabId) {
+    // This tab is an internal navigation target; do not treat it as a user-created “new tab”.
+    navigationTabs.add(details.tabId);
+    debugLogger.log(`Marked tab ${details.tabId} as navigation tab`);
+  }
 });
 
 // Monitor URL changes in Zendesk tabs
